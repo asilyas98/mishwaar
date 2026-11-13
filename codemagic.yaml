@@ -3,12 +3,14 @@ workflows:
     name: Mishwaar iOS App Store build
     instance_type: mac_mini_m2
     max_build_duration: 60
+
     integrations:
       app_store_connect: Codemagic
+
     environment:
       groups:
         - mishwaar_app
-      node: 24
+      node: "24"
       xcode: latest
       ios_signing:
         distribution_type: app_store
@@ -16,19 +18,46 @@ workflows:
       vars:
         XCODE_PROJECT: ios/App/App.xcodeproj
         XCODE_SCHEME: App
+
     scripts:
       - name: Install JavaScript dependencies
         script: npm ci --no-audit --no-fund
+
       - name: Build web app and synchronize iOS project
         script: npm run sync:ios
+
+      - name: Increment iOS build number
+        script: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const buildNumber = String(Number(process.env.BUILD_NUMBER || '1') + 1);
+          const projectPath = 'ios/App/App.xcodeproj/project.pbxproj';
+          const project = fs.readFileSync(projectPath, 'utf8');
+          const updated = project.replace(
+            /CURRENT_PROJECT_VERSION = \d+;/g,
+            `CURRENT_PROJECT_VERSION = ${buildNumber};`
+          );
+
+          if (updated === project) {
+            throw new Error('Could not find CURRENT_PROJECT_VERSION in the Xcode project.');
+          }
+
+          fs.writeFileSync(projectPath, updated);
+          console.log(`Set iOS build number to ${buildNumber}`);
+          NODE
+
       - name: Apply App Store signing profile
         script: xcode-project use-profiles
+
       - name: Build signed IPA
         script: xcode-project build-ipa --project "$XCODE_PROJECT" --scheme "$XCODE_SCHEME"
+
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
       - build/ios/archive/*.dSYM.zip
+
     publishing:
       app_store_connect:
         auth: integration
